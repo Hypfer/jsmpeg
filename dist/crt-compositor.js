@@ -132,8 +132,7 @@ export class CRTCompositor {
     }
     setStreamState(state) {
         this.streamStateWired = true;
-        this.streamConnected =
-            state === 'streaming' || state === 'stalled' || state === 'connecting';
+        this.streamConnected = state === 'streaming' || state === 'stalled';
     }
     setLabel(text) {
         this.cfg.label = text;

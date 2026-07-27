@@ -230,8 +230,7 @@ export class CRTCompositor implements Renderer, StreamStateSink {
 
 	setStreamState(state: StreamState): void {
 		this.streamStateWired = true;
-		this.streamConnected =
-			state === 'streaming' || state === 'stalled' || state === 'connecting';
+		this.streamConnected = state === 'streaming' || state === 'stalled';
 	}
 
 	setLabel(text: string): void {
