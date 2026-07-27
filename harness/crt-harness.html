@@ -1,0 +1,608 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>CRT compositor tuning harness</title>
+<style>
+  :root { color-scheme: dark; }
+  body {
+    margin: 0; background: #0b0d10; color: #cfd6df;
+    font: 13px/1.4 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    display: flex; gap: 18px; padding: 18px; flex-wrap: wrap;
+  }<
+  h1 { font-size: 14px; margin: 0 0 4px; color: #8fd3ff; letter-spacing: .04em; }
+  .stage { flex: 0 0 auto; }
+  canvas#gl, canvas#c2d {
+    width: 640px; height: 360px; background: #000;
+    image-rendering: pixelated; border: 1px solid #223; border-radius: 4px;
+    display: block;
+  }
+  .panel { flex: 1 1 320px; min-width: 300px; max-width: 460px; }
+  fieldset { border: 1px solid #223; border-radius: 6px; margin: 0 0 12px; padding: 10px 12px; }
+  legend { color: #8fd3ff; padding: 0 6px; }
+  .row { display: flex; align-items: center; gap: 8px; margin: 6px 0; }
+  .row label { flex: 0 0 130px; color: #9aa6b2; }
+  .row input[type=range] { flex: 1 1 auto; }
+  .row .val { flex: 0 0 60px; text-align: right; color: #e8eef5; }
+  .btns { display: flex; gap: 8px; flex-wrap: wrap; }
+  button {
+    background: #16202b; color: #cfe6ff; border: 1px solid #2a3a4a;
+    border-radius: 5px; padding: 7px 11px; cursor: pointer; font: inherit;
+  }
+  button:hover { background: #1d2c3a; }
+  button.active { background: #21506e; border-color: #3f86b6; color: #fff; }
+  .readout { display: grid; grid-template-columns: auto 1fr; gap: 2px 12px; }
+  .readout dt { color: #9aa6b2; }
+  .readout dd { margin: 0; color: #e8eef5; }
+  .hint { color: #6b7785; margin: 2px 0 0; }
+  code { color: #ffd479; }
+</style>
+</head>
+<body>
+  <div class="stage">
+    <h1>CRT COMPOSITOR — tuning harness</h1>
+    <canvas id="gl" width="640" height="360"></canvas>
+    <canvas id="c2d" width="640" height="360" style="display:none"></canvas>
+    <p class="hint">Synthetic "video" = moving bands + a live frame counter, so a frozen picture is obvious.
+    No-signal = colour-bar test card; the VALETUDO channel indicator pops up when the stream starts.</p>
+  </div>
+
+  <div class="panel">
+    <fieldset>
+      <legend>signal state</legend>
+      <div class="btns">
+        <button id="btnLive" class="active">Live (feed frames)</button>
+        <button id="btnStall">Stall (open, no frames)</button>
+        <button id="btnLost">Cut signal</button>
+        <button id="btnReconnect">Reconnect</button>
+      </div>
+      <p class="hint"><b>Stall</b> = connection alive, snow creeps but stays snow.
+      <b>Cut signal</b> = snow saturates, holds a beat, then <b>hard-cuts</b> to the colour-bar test card.</p>
+    </fieldset>
+
+    <fieldset>
+      <legend>tuning knobs</legend>
+      <div class="row"><label>source fps</label><input id="srcFps" type="range" min="1" max="30" step="1" value="15"><span class="val" id="srcFpsV"></span></div>
+      <div class="row"><label>deadband (s)</label><input id="deadband" type="range" min="0" max="3" step="0.05" value="0.05"><span class="val" id="deadbandV"></span></div>
+      <div class="row"><label>ramp (s)</label><input id="ramp" type="range" min="0.2" max="8" step="0.1" value="1.2"><span class="val" id="rampV"></span></div>
+      <div class="row"><label>phosphor blend</label><input id="blend" type="range" min="0" max="0.6" step="0.01" value="0.2"><span class="val" id="blendV"></span></div>
+      <div class="row"><label>snow hold (s)</label><input id="standbyDelay" type="range" min="0" max="6" step="0.1" value="0.2"><span class="val" id="standbyDelayV"></span></div>
+      <div class="row"><label>tune-in black (s)</label><input id="tuneInBlack" type="range" min="0" max="2" step="0.05" value="0.5"><span class="val" id="tuneInBlackV"></span></div>
+      <div class="row"><label>label hold (s)</label><input id="labelHold" type="range" min="0" max="10" step="0.5" value="2"><span class="val" id="labelHoldV"></span></div>
+      <div class="row"><label>label size (×h)</label><input id="labelScale" type="range" min="0.03" max="0.16" step="0.005" value="0.06"><span class="val" id="labelScaleV"></span></div>
+      <div class="row"><label>scanlines</label><input id="scan" type="range" min="0" max="0.4" step="0.01" value="0.12"><span class="val" id="scanV"></span></div>
+    </fieldset>
+
+    <fieldset>
+      <legend>manual noise override</legend>
+      <div class="row">
+        <label><input id="manualOn" type="checkbox"> level</label>
+        <input id="manual" type="range" min="0" max="1" step="0.01" value="0.5" disabled>
+        <span class="val" id="manualV"></span>
+      </div>
+      <p class="hint">Freeze the noise level to inspect the look regardless of the timer.</p>
+    </fieldset>
+
+    <fieldset>
+      <legend>present rate (proves rate-independence)</legend>
+      <div class="btns">
+        <button data-hz="15">15 Hz</button>
+        <button data-hz="30">30 Hz</button>
+        <button data-hz="60" class="active">60 Hz</button>
+        <button data-hz="144">144 Hz</button>
+      </div>
+      <p class="hint">Noise level is wall-clock driven, so the ramp reaches full in the same real time at any rate.</p>
+    </fieldset>
+
+    <fieldset>
+      <legend>renderer</legend>
+      <div class="btns">
+        <button data-backend="gl" class="active">WebGL (full)</button>
+        <button data-backend="c2d">Canvas2D (degraded)</button>
+      </div>
+      <p class="hint">Canvas2D is the fallback for weak / blocklisted GPUs. Snow = pre-baked streak-noise tiles + phosphor blend (no per-pixel work per frame).</p>
+    </fieldset>
+
+    <fieldset>
+      <legend>readout</legend>
+      <dl class="readout">
+        <dt>regime</dt><dd id="roRegime">—</dd>
+        <dt>since last frame</dt><dd id="roSince">—</dd>
+        <dt>noise level</dt><dd id="roNoise">—</dd>
+        <dt>standby level</dt><dd id="roStandby">—</dd>
+        <dt>label level</dt><dd id="roLabel">—</dd>
+        <dt>present fps</dt><dd id="roFps">—</dd>
+        <dt>ever connected</dt><dd id="roEver">—</dd>
+      </dl>
+    </fieldset>
+  </div>
+
+<script>
+"use strict";
+
+// ---------------------------------------------------------------- GL helpers
+const canvas = document.getElementById("gl");
+const gl = canvas.getContext("webgl", { antialias: false, preserveDrawingBuffer: false });
+if (!gl) { document.body.innerHTML = "<p style='color:#f88;padding:20px'>WebGL unavailable.</p>"; throw new Error("no webgl"); }
+
+const W = canvas.width, H = canvas.height;
+
+// Tuning knobs (mirrors the library's options.crt). Declared up here because
+// bakeLabel() reads K.labelScale during init, before the state machine below.
+const K = { srcFps: 15, deadband: 0.05, ramp: 1.2, blend: 0.2, standbyDelay: 0.2, tuneInBlack: 0.5, labelHold: 2, labelScale: 0.06, scan: 0.12 };
+
+function compile(type, src) {
+  const s = gl.createShader(type);
+  gl.shaderSource(s, src); gl.compileShader(s);
+  if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(s) + "\n" + src);
+  return s;
+}
+function program(vs, fs) {
+  const p = gl.createProgram();
+  gl.attachShader(p, compile(gl.VERTEX_SHADER, vs));
+  gl.attachShader(p, compile(gl.FRAGMENT_SHADER, fs));
+  gl.linkProgram(p);
+  if (!gl.getProgramParameter(p, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(p));
+  return p;
+}
+
+// Full-screen quad (triangle strip).
+const quad = gl.createBuffer();
+gl.bindBuffer(gl.ARRAY_BUFFER, quad);
+gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([
+  -1,-1, 0,0,   1,-1, 1,0,   -1,1, 0,1,   1,1, 1,1,
+]), gl.STATIC_DRAW);
+
+function bindQuad(p) {
+  const loc = gl.getAttribLocation(p, "aPos");
+  const luv = gl.getAttribLocation(p, "aUv");
+  gl.bindBuffer(gl.ARRAY_BUFFER, quad);
+  gl.enableVertexAttribArray(loc); gl.vertexAttribPointer(loc, 2, gl.FLOAT, false, 16, 0);
+  gl.enableVertexAttribArray(luv); gl.vertexAttribPointer(luv, 2, gl.FLOAT, false, 16, 8);
+}
+
+const VS = `
+  attribute vec2 aPos; attribute vec2 aUv; varying vec2 vUv;
+  void main(){ vUv = aUv; gl_Position = vec4(aPos, 0.0, 1.0); }
+`;
+
+// --- Pass 1: generate one snow field with phosphor smear (ping-pong).
+const NOISE_FS = `
+  precision highp float;
+  varying vec2 vUv;
+  uniform sampler2D uPrev;   // previous snow field
+  uniform float uSeed;       // changes once per PRESENT (not per pixel)
+  uniform float uBlend;      // fraction of previous frame retained (phosphor)
+  uniform vec2  uRes;
+
+  float hash(vec2 p){ return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453123); }
+
+  void main(){
+    vec2 px = vUv * uRes;
+    // Horizontal streak: coarse in x, fine in y — reads as TV snow, not dither.
+    float base = hash(vec2(floor(px.x / 2.0), floor(px.y)) + uSeed);
+    float row  = hash(vec2(0.0, floor(px.y)) + uSeed * 1.7);   // whole-row flicker
+    float n = mix(base, row, 0.15);
+    n = pow(n, 0.8);                                            // lift toward bright sparkle
+    float prev = texture2D(uPrev, vUv).r;
+    float outv = mix(n, prev, uBlend);                          // ~20% previous = smear
+    gl_FragColor = vec4(vec3(outv), 1.0);
+  }
+`;
+
+// --- Pass 2: composite last picture + snow, hard-cut to a colour-bar test
+// card as the no-signal screen, and overlay the green corner channel label.
+const COMP_FS = `
+  precision highp float;
+  varying vec2 vUv;
+  uniform sampler2D uVideo;  // last decoded frame
+  uniform sampler2D uSnow;   // snow field from pass 1
+  uniform sampler2D uLabel;  // baked corner channel label (rgba)
+  uniform float uNoise;      // 0..1 how snowy
+  uniform float uStandby;    // 0/1 hard-cut to the test card
+  uniform float uBlack;      // 0/1 tune-in black screen
+  uniform float uLabelAmt;   // 0/1 corner label opacity
+  uniform float uScan;       // scanline strength
+  uniform vec2  uRes;
+
+  // EBU-style colour bars with a dark pedestal strip along the bottom.
+  vec3 testCard(vec2 uv){
+    float i = floor(uv.x * 7.0);
+    vec3 c = vec3(0.0, 0.0, 0.75);                 // blue
+    if      (i < 1.0) c = vec3(0.75);              // grey/white
+    else if (i < 2.0) c = vec3(0.75, 0.75, 0.0);   // yellow
+    else if (i < 3.0) c = vec3(0.0, 0.75, 0.75);   // cyan
+    else if (i < 4.0) c = vec3(0.0, 0.75, 0.0);    // green
+    else if (i < 5.0) c = vec3(0.75, 0.0, 0.75);   // magenta
+    else if (i < 6.0) c = vec3(0.75, 0.0, 0.0);    // red
+    if (uv.y < 0.18) c = mix(vec3(0.02), vec3(0.1), step(0.5, fract(uv.x * 4.0)));
+    return c;
+  }
+
+  void main(){
+    vec3 pic  = texture2D(uVideo, vUv).rgb;
+    float sn  = texture2D(uSnow, vUv).r;
+    vec3 withSnow = mix(pic, vec3(sn), uNoise);
+
+    // Hard-cut to the colour-bar test card as the no-signal screen.
+    vec3 col = mix(withSnow, testCard(vUv), uStandby);
+
+    // Subtle CRT scanlines over the picture.
+    float line = 1.0 - uScan * (0.5 + 0.5 * sin(vUv.y * uRes.y * 3.14159));
+    col *= line;
+
+    // Tune-in black screen (briefly, while the set locks onto the channel).
+    col = mix(col, vec3(0.0), uBlack);
+
+    // Green corner channel label on top (like a channel-switch OSD).
+    vec4 lb = texture2D(uLabel, vUv);
+    col = mix(col, lb.rgb, lb.a * uLabelAmt);
+
+    gl_FragColor = vec4(col, 1.0);
+  }
+`;
+
+const noiseProg = program(VS, NOISE_FS);
+const compProg  = program(VS, COMP_FS);
+
+// ---------------------------------------------------------------- textures / FBOs
+function makeTex(w, h, data) {
+  const t = gl.createTexture();
+  gl.bindTexture(gl.TEXTURE_2D, t);
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, w, h, 0, gl.RGBA, gl.UNSIGNED_BYTE, data || null);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+  return t;
+}
+function makeFBO(w, h) {
+  const tex = makeTex(w, h, null);
+  const fbo = gl.createFramebuffer();
+  gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
+  gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, tex, 0);
+  gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+  return { tex, fbo };
+}
+
+let snowA = makeFBO(W, H), snowB = makeFBO(W, H);
+const videoTex = makeTex(W, H, null);
+
+// --- Baked corner input label (MGS-style green OSD). Rebake on resize.
+const labelTex = makeTex(W, H, null);
+let labelCanvas = null;            // same bitmap, reused by the Canvas2D backend
+function bakeLabel(text) {
+  const c = document.createElement("canvas"); c.width = W; c.height = H;
+  const x = c.getContext("2d");
+  x.clearRect(0, 0, W, H);
+  x.textAlign = "right"; x.textBaseline = "top";
+  // Font size is a fraction of frame HEIGHT so the label stays a consistent
+  // size regardless of camera resolution (matches the library).
+  const fontPx = Math.max(8, Math.round(H * K.labelScale));
+  const margin = Math.round(fontPx * 0.7);
+  x.font = "bold " + fontPx + "px 'Courier New', monospace";
+  // Flat green OSD label — no bloom.
+  x.fillStyle = "#0ad108";
+  x.fillText(text, W - margin, margin);
+  labelCanvas = c;                 // reused by the Canvas2D backend
+  gl.bindTexture(gl.TEXTURE_2D, labelTex);
+  gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, c);
+  gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
+}
+bakeLabel("VALETUDO");
+
+// --- Synthetic "video" frame generator.
+const vcanvas = document.createElement("canvas"); vcanvas.width = W; vcanvas.height = H;
+const vctx = vcanvas.getContext("2d");
+let frameNo = 0;
+function drawSyntheticFrame() {
+  frameNo++;
+  // Moving colour bands + sweep so a frozen picture is obvious.
+  for (let i = 0; i < 8; i++) {
+    const hue = (i * 45 + frameNo * 4) % 360;
+    vctx.fillStyle = `hsl(${hue}, 70%, 45%)`;
+    vctx.fillRect(0, (H / 8) * i, W, H / 8);
+  }
+  const sweep = (frameNo * 6) % W;
+  vctx.fillStyle = "rgba(255,255,255,0.6)";
+  vctx.fillRect(sweep, 0, 3, H);
+  vctx.fillStyle = "#000"; vctx.fillRect(W/2 - 90, H/2 - 30, 180, 60);
+  vctx.fillStyle = "#0f0"; vctx.font = "bold 40px monospace";
+  vctx.textAlign = "center"; vctx.textBaseline = "middle";
+  vctx.fillText("F " + String(frameNo).padStart(5, "0"), W/2, H/2);
+  gl.bindTexture(gl.TEXTURE_2D, videoTex);
+  gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, vcanvas);
+  gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
+}
+
+// ---------------------------------------------------------------- rendering
+let seedCounter = 0;
+function renderGL(noiseLevel, standbyLevel, labelLevel, blackLevel) {
+  // Pass 1: snowB = f(snowA, seed)
+  seedCounter++;
+  gl.bindFramebuffer(gl.FRAMEBUFFER, snowB.fbo);
+  gl.viewport(0, 0, W, H);
+  gl.useProgram(noiseProg); bindQuad(noiseProg);
+  gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, snowA.tex);
+  gl.uniform1i(gl.getUniformLocation(noiseProg, "uPrev"), 0);
+  gl.uniform1f(gl.getUniformLocation(noiseProg, "uSeed"), (seedCounter % 997) * 1.37);
+  gl.uniform1f(gl.getUniformLocation(noiseProg, "uBlend"), K.blend);
+  gl.uniform2f(gl.getUniformLocation(noiseProg, "uRes"), W, H);
+  gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+  const tmp = snowA; snowA = snowB; snowB = tmp; // ping-pong
+
+  // Pass 2: composite to screen
+  gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+  gl.viewport(0, 0, W, H);
+  gl.useProgram(compProg); bindQuad(compProg);
+  gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, videoTex);
+  gl.uniform1i(gl.getUniformLocation(compProg, "uVideo"), 0);
+  gl.activeTexture(gl.TEXTURE1); gl.bindTexture(gl.TEXTURE_2D, snowA.tex);
+  gl.uniform1i(gl.getUniformLocation(compProg, "uSnow"), 1);
+  gl.activeTexture(gl.TEXTURE2); gl.bindTexture(gl.TEXTURE_2D, labelTex);
+  gl.uniform1i(gl.getUniformLocation(compProg, "uLabel"), 2);
+  gl.uniform1f(gl.getUniformLocation(compProg, "uNoise"), noiseLevel);
+  gl.uniform1f(gl.getUniformLocation(compProg, "uStandby"), standbyLevel);
+  gl.uniform1f(gl.getUniformLocation(compProg, "uBlack"), blackLevel);
+  gl.uniform1f(gl.getUniformLocation(compProg, "uLabelAmt"), labelLevel);
+  gl.uniform1f(gl.getUniformLocation(compProg, "uScan"), K.scan);
+  gl.uniform2f(gl.getUniformLocation(compProg, "uRes"), W, H);
+  gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+}
+
+// ---------------------------------------------------------------- Canvas2D backend (degraded)
+// The fallback for weak / blocklisted GPUs. Snow is pre-baked streak-noise
+// tiles cycled + phosphor-blended in an accumulator, so there is NO per-pixel
+// JS per frame — just a few drawImage calls. Same state math as the WebGL path.
+const c2d = document.getElementById("c2d");
+const c2dCtx = c2d.getContext("2d");
+
+function makeNoiseTile() {
+  const c = document.createElement("canvas"); c.width = W; c.height = H;
+  const cx = c.getContext("2d");
+  const img = cx.createImageData(W, H);
+  const d = img.data;
+  for (let y = 0; y < H; y++) {
+    const rowFlick = Math.random();
+    let n = 0;
+    for (let x = 0; x < W; x++) {
+      if ((x & 1) === 0) n = Math.pow(Math.random(), 0.8);   // 2px horizontal streak
+      const v = (n * 0.85 + rowFlick * 0.15) * 255;
+      const i = (y * W + x) * 4;
+      d[i] = d[i + 1] = d[i + 2] = v; d[i + 3] = 255;
+    }
+  }
+  cx.putImageData(img, 0, 0);
+  return c;
+}
+const noiseTiles = [];
+for (let t = 0; t < 16; t++) noiseTiles.push(makeNoiseTile());
+
+// Phosphor accumulator: blend `blend` of the previous field into each new one.
+const snowCanvas = document.createElement("canvas"); snowCanvas.width = W; snowCanvas.height = H;
+const snowCtx = snowCanvas.getContext("2d");
+snowCtx.fillStyle = "#000"; snowCtx.fillRect(0, 0, W, H);
+let tileIdx = 0;
+
+// Pre-baked scanline overlay, drawn at globalAlpha = scan.
+const scanCanvas = document.createElement("canvas"); scanCanvas.width = W; scanCanvas.height = H;
+(function () { const s = scanCanvas.getContext("2d"); s.fillStyle = "#000"; for (let y = 0; y < H; y += 2) s.fillRect(0, y, W, 1); })();
+
+const BAR = [[191,191,191],[191,191,0],[0,191,191],[0,191,0],[191,0,191],[191,0,0],[0,0,191]];
+function drawTestCard(ctx) {
+  const bw = W / 7;
+  for (let i = 0; i < 7; i++) {
+    const c = BAR[i];
+    ctx.fillStyle = "rgb(" + c[0] + "," + c[1] + "," + c[2] + ")";
+    ctx.fillRect(Math.floor(i * bw), 0, Math.ceil(bw), H);
+  }
+  const py = Math.floor(H * 0.82), pw = Math.floor(W / 8);
+  for (let i = 0; i * pw < W; i++) { ctx.fillStyle = (i % 2) ? "#1a1a1a" : "#050505"; ctx.fillRect(i * pw, py, pw, H - py); }
+}
+
+function renderCanvas(noise, standby, label, black) {
+  const ctx = c2dCtx;
+  ctx.globalAlpha = 1;
+  if (standby) {
+    drawTestCard(ctx);
+  } else {
+    ctx.drawImage(vcanvas, 0, 0);
+    if (noise > 0.001) {
+      snowCtx.globalAlpha = 1 - K.blend;                       // phosphor: keep `blend` of prev
+      snowCtx.drawImage(noiseTiles[tileIdx++ % noiseTiles.length], 0, 0);
+      snowCtx.globalAlpha = 1;
+      ctx.globalAlpha = noise;                                 // mix(video, snow, noise)
+      ctx.drawImage(snowCanvas, 0, 0);
+      ctx.globalAlpha = 1;
+    }
+  }
+  if (K.scan > 0) { ctx.globalAlpha = K.scan; ctx.drawImage(scanCanvas, 0, 0); ctx.globalAlpha = 1; }
+  if (black) { ctx.fillStyle = "#000"; ctx.fillRect(0, 0, W, H); }
+  if (label && labelCanvas) ctx.drawImage(labelCanvas, 0, 0);
+}
+
+// --- backend dispatch
+let backend = "gl";
+function present(noise, standby, label, black) {
+  if (backend === "gl") renderGL(noise, standby, label, black);
+  else renderCanvas(noise, standby, label, black);
+}
+
+// ---------------------------------------------------------------- state machine
+// (K is declared near the top so bakeLabel() can read it during init.)
+let mode = "live";          // 'live' | 'stall' | 'lost'
+let everConnected = false;
+let lastFrameAt = performance.now();
+let lastFedAt = 0;
+let standbyOn = false;      // hard on/off: black no-signal screen
+let standbyLevel = 0;       // 0 or 1 (hard cut)
+let saturatedSince = null;  // ms when noise first hit ~1 under 'lost'
+let manualLevel = null;
+// Snow progress 0..1, eased both ways at the `ramp` rate (rises with no frames,
+// falls back as they resume). Displayed noise is a smoothstep of this.
+let noiseP = 0;
+let lastLevelAt = performance.now();
+let labelLevel = 0;         // 0 or 1 (hard cut)
+// sawStandby starts true so the very first stream acquisition also plays the
+// tune-in (black + label) — cold start counts as coming from "no signal".
+let wasLive = false, sawStandby = true, channelStartAt = -1e12;
+
+function smoothstep(a, b, x) {
+  if (b <= a) return x < a ? 0 : 1;
+  const t = Math.min(1, Math.max(0, (x - a) / (b - a)));
+  return t * t * (3 - 2 * t);
+}
+const clamp01 = (v) => Math.min(1, Math.max(0, v));
+
+// --- present loop, throttled to a target rate; level is wall-clock driven.
+let targetHz = 60;
+let lastPresent = performance.now();
+let acc = 0, fpsEma = 60, regime = "live";
+
+function tick(now) {
+  requestAnimationFrame(tick);
+  let dt = (now - lastPresent) / 1000;
+  lastPresent = now;
+  dt = Math.min(dt, 0.1);            // clamp tab-switch / stall spikes
+  acc += dt;
+  const interval = 1 / targetHz;
+  if (acc < interval) return;
+  acc = acc % interval;
+  fpsEma = fpsEma * 0.9 + (1 / Math.max(dt, 1e-3)) * 0.1;
+
+  // Feed a synthetic frame at source-fps while "live".
+  if (mode === "live" && now - lastFedAt >= 1000 / K.srcFps) {
+    drawSyntheticFrame();
+    lastFedAt = now;
+    lastFrameAt = now;
+    everConnected = true;
+  }
+
+  const sinceFrame = (now - lastFrameAt) / 1000;
+
+  // Eased noise progress — rises past the deadband while frames are absent,
+  // falls back at the SAME rate as they resume (reception improving). Uses
+  // present-spacing dt so it stays wall-clock at any present rate. A frame
+  // returning while parked on the test card is a hard re-acquire (snap clean).
+  const ldt = Math.min((now - lastLevelAt) / 1000, 0.1);
+  lastLevelAt = now;
+  if (manualLevel !== null) {
+    noiseP = manualLevel;
+  } else {
+    const target = sinceFrame > K.deadband ? 1 : 0;
+    const step = K.ramp > 0 ? ldt / K.ramp : 1;
+    if (standbyOn && target === 0) noiseP = 0;
+    else noiseP = clamp01(noiseP + (target === 1 ? step : -step));
+  }
+  let noise = smoothstep(0, 1, noiseP);
+
+  // Hard cut to the black no-signal screen: sit on full snow for `snow hold`
+  // seconds, then snap to black + label instantly (no crossfade — that's how
+  // period OSDs behaved). Recovery is an equally hard cut back to video.
+  if (!everConnected) {
+    standbyOn = true;
+    regime = "test card (never connected)";
+  } else if (mode === "lost" && noise >= 0.98) {
+    if (saturatedSince === null) saturatedSince = now;
+    standbyOn = (now - saturatedSince) / 1000 >= K.standbyDelay;
+    regime = standbyOn ? "no signal (test card)" : "snow (about to cut)";
+  } else {
+    saturatedSince = null;
+    if (noise < 0.98) standbyOn = false;
+    regime = noise < 0.02 ? "live" : (mode === "stall" ? "stalled (snow)" : "degrading (snow)");
+  }
+  standbyLevel = standbyOn ? 1 : 0;               // hard cut
+
+  // Channel acquire: only when locking on from the test card / cold start (not
+  // a brief snow-stall recovery). On acquire, show a short black screen + the
+  // VALETUDO channel label, THEN the picture — like a set tuning to a channel.
+  if (standbyOn) sawStandby = true;
+  const isLive = noise < 0.02 && !standbyOn;
+  if (isLive && !wasLive && sawStandby) {
+    channelStartAt = now;
+    sawStandby = false;
+  }
+  wasLive = isLive;
+
+  const sinceStart = now - channelStartAt;
+  const blackLevel = sinceStart < K.tuneInBlack * 1000 ? 1 : 0;   // tune-in black
+  const labelOn = !standbyOn && sinceStart < K.labelHold * 1000;  // channel indicator
+  labelLevel = labelOn ? 1 : 0;
+  if (blackLevel && regime === "live") regime = "tuning in (black + label)";
+
+  present(noise, standbyLevel, labelLevel, blackLevel);
+
+  // Readout
+  roRegime.textContent = regime;
+  roSince.textContent = sinceFrame.toFixed(2) + " s";
+  roNoise.textContent = noise.toFixed(3);
+  roStandby.textContent = standbyLevel.toFixed(3);
+  roLabel.textContent = labelLevel.toFixed(3);
+  roFps.textContent = fpsEma.toFixed(0) + " (target " + targetHz + ")";
+  roEver.textContent = everConnected ? "yes" : "no";
+}
+requestAnimationFrame(tick);
+
+// Reset the "since last frame" clock when returning to a foregrounded tab,
+// so a background gap doesn't teleport us to full snow.
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible") {
+    lastPresent = performance.now();
+    if (mode === "live") lastFrameAt = performance.now();
+  }
+});
+
+// ---------------------------------------------------------------- UI wiring
+const $ = (id) => document.getElementById(id);
+function knob(id, key, fmt, onChange) {
+  const el = $(id), out = $(id + "V");
+  const upd = () => { K[key] = parseFloat(el.value); out.textContent = fmt ? fmt(K[key]) : el.value; if (onChange) onChange(); };
+  el.addEventListener("input", upd); upd();
+}
+knob("srcFps", "srcFps"); knob("deadband", "deadband"); knob("ramp", "ramp");
+knob("blend", "blend"); knob("standbyDelay", "standbyDelay"); knob("tuneInBlack", "tuneInBlack");
+knob("labelHold", "labelHold"); knob("scan", "scan");
+// Re-bake the label bitmap whenever its size changes.
+knob("labelScale", "labelScale", (v) => v.toFixed(3), () => bakeLabel("VALETUDO"));
+
+const stateBtns = { live: $("btnLive"), stall: $("btnStall"), lost: $("btnLost") };
+function setMode(m) {
+  mode = m; saturatedSince = null;
+  for (const k in stateBtns) stateBtns[k].classList.toggle("active", k === m);
+  if (m === "live") lastFrameAt = performance.now();
+}
+$("btnLive").onclick = () => setMode("live");
+$("btnStall").onclick = () => setMode("stall");
+$("btnLost").onclick = () => setMode("lost");
+$("btnReconnect").onclick = () => setMode("live");
+
+const manualOn = $("manualOn"), manual = $("manual"), manualV = $("manualV");
+function updManual() {
+  manual.disabled = !manualOn.checked;
+  manualLevel = manualOn.checked ? parseFloat(manual.value) : null;
+  manualV.textContent = manualOn.checked ? parseFloat(manual.value).toFixed(2) : "off";
+}
+manualOn.addEventListener("change", updManual);
+manual.addEventListener("input", updManual);
+updManual();
+
+document.querySelectorAll("[data-hz]").forEach((b) => {
+  b.onclick = () => {
+    targetHz = parseInt(b.dataset.hz, 10);
+    document.querySelectorAll("[data-hz]").forEach((x) => x.classList.toggle("active", x === b));
+  };
+});
+
+function setBackend(b) {
+  backend = b;
+  canvas.style.display = b === "gl" ? "block" : "none";
+  c2d.style.display = b === "gl" ? "none" : "block";
+  document.querySelectorAll("[data-backend]").forEach((x) => x.classList.toggle("active", x.dataset.backend === b));
+}
+document.querySelectorAll("[data-backend]").forEach((b) => { b.onclick = () => setBackend(b.dataset.backend); });
+</script>
+</body>
+</html>

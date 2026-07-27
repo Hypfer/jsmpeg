@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>CRT compositor — integration test (real dist build)</title>
+<style>
+  :root { color-scheme: dark; }
+  body { margin: 0; background: #0b0d10; color: #cfd6df;
+    font: 13px/1.4 ui-monospace, Menlo, Consolas, monospace;
+    display: flex; gap: 18px; padding: 18px; flex-wrap: wrap; }
+  h1 { font-size: 14px; margin: 0 0 8px; color: #8fd3ff; }
+  canvas { width: 640px; height: 480px; background: #000; image-rendering: pixelated;
+    border: 1px solid #223; border-radius: 4px; display: block; }
+  .btns { display: flex; gap: 8px; flex-wrap: wrap; margin: 10px 0; }
+  button { background: #16202b; color: #cfe6ff; border: 1px solid #2a3a4a;
+    border-radius: 5px; padding: 7px 11px; cursor: pointer; font: inherit; }
+  button:hover { background: #1d2c3a; }
+  button.active { background: #21506e; border-color: #3f86b6; color: #fff; }
+  .hint { color: #6b7785; max-width: 640px; }
+  code { color: #ffd479; }
+  #err { color: #f88; white-space: pre-wrap; }
+</style>
+</head>
+<body>
+  <div>
+    <h1>CRT COMPOSITOR — integration test (imports <code>../dist/index.js</code>)</h1>
+    <canvas id="view" width="320" height="240"></canvas>
+    <div class="btns">
+      <button id="bLive" class="active">Live (feed frames)</button>
+      <button id="bStall">Stall (connected, no frames)</button>
+      <button id="bCut">Cut signal (drop)</button>
+      <button id="bReconnect">Reconnect</button>
+      <button id="bResize">resize() 384×288</button>
+    </div>
+    <p class="hint">Drives the <b>real</b> <code>CRTCompositor</code> from the compiled build with synthetic
+      YCbCr planes at 15 fps. <b>Stall</b> feeds <code>setStreamState('stalled')</code> → snow holds.
+      <b>Cut</b> feeds <code>setStreamState('closed')</code> → snow saturates then hard-cuts to the test card.</p>
+    <p id="err"></p>
+  </div>
+
+<script type="module">
+import { CRTCompositor } from "../dist/index.js";
+
+const err = document.getElementById("err");
+window.addEventListener("error", (e) => { err.textContent = "ERROR: " + e.message; });
+
+let W = 320, H = 240;
+const canvas = document.getElementById("view");
+
+let crt;
+try {
+  // New API: options carry the surface/dims, a second arg carries CRT knobs.
+  // (Via Player you'd instead pass `createRenderer: (o) => new CRTCompositor(o, {...})`.)
+  crt = new CRTCompositor({ canvas, videoWidth: W, videoHeight: H }, { label: "VALETUDO" });
+} catch (e) { err.textContent = "construct failed: " + e.message; throw e; }
+
+// --- synthetic YCbCr frame generator (moving bands + a bright sweep) ---
+function codedW(w) { return ((w + 15) >> 4) << 4; }
+let frameNo = 0;
+function makeFrame() {
+  frameNo++;
+  const cw = codedW(W);
+  const y = new Uint8ClampedArray(cw * H);
+  const w2 = cw >> 1, h2 = H >> 1;
+  const cb = new Uint8ClampedArray(w2 * h2);
+  const cr = new Uint8ClampedArray(w2 * h2);
+  for (let row = 0; row < H; row++) {
+    const band = ((row + frameNo * 3) >> 4) & 1 ? 200 : 90;   // moving horizontal bands
+    for (let col = 0; col < W; col++) {
+      y[row * cw + col] = band;
+    }
+  }
+  // bright vertical sweep so a freeze is obvious
+  const sweep = (frameNo * 6) % W;
+  for (let row = 0; row < H; row++) {
+    y[row * cw + sweep] = 255;
+    if (sweep + 1 < W) y[row * cw + sweep + 1] = 255;
+  }
+  cb.fill(128); cr.fill(128);   // grayscale
+  return { y, cb, cr };
+}
+
+let mode = "live"; // 'live' | 'stall' | 'cut'
+let feedTimer = null;
+function startFeeding() {
+  stopFeeding();
+  feedTimer = setInterval(() => {
+    const f = makeFrame();
+    crt.render(f.y, f.cb, f.cr, true);
+  }, 1000 / 15);
+}
+function stopFeeding() { if (feedTimer) { clearInterval(feedTimer); feedTimer = null; } }
+
+const btns = { live: bLive, stall: bStall, cut: bCut };
+function setMode(m) {
+  mode = m;
+  for (const k in btns) btns[k].classList.toggle("active", k === m);
+}
+
+bLive.onclick = () => { setMode("live"); crt.setStreamState("streaming"); startFeeding(); };
+bStall.onclick = () => { setMode("stall"); stopFeeding(); crt.setStreamState("stalled"); };
+bCut.onclick = () => { setMode("cut"); stopFeeding(); crt.setStreamState("closed"); };
+bReconnect.onclick = () => { setMode("live"); crt.setStreamState("streaming"); startFeeding(); };
+bResize.onclick = () => { W = 384; H = 288; crt.resize(W, H); };
+
+// go
+crt.setStreamState("streaming");
+startFeeding();
+</script>
+</body>
+</html>

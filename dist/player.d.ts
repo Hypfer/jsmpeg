@@ -1,0 +1,44 @@
+import { MP2Audio } from './mp2-decoder.js';
+import { MPEG1Video } from './mpeg1-decoder.js';
+import { TSDemuxer } from './ts-demuxer.js';
+import { WebAudioOutput } from './webaudio-output.js';
+import type { JSMpegOptions, Renderer, Source } from './types.js';
+export declare class Player {
+    options: JSMpegOptions;
+    source: Source;
+    demuxer: TSDemuxer;
+    video?: MPEG1Video;
+    renderer?: Renderer;
+    audio?: MP2Audio;
+    audioOut?: WebAudioOutput;
+    maxAudioLag: number;
+    loop: boolean;
+    autoplay: boolean;
+    paused: boolean;
+    unpauseOnShow: boolean;
+    wantsToPlay: boolean;
+    isPlaying: boolean;
+    animationId: number | null;
+    startTime: number;
+    constructor(url: string, options: JSMpegOptions);
+    get currentTime(): number;
+    set currentTime(time: number);
+    get volume(): number;
+    set volume(volume: number);
+    startLoading(): void;
+    showHide(): void;
+    play(): void;
+    pause(): void;
+    getVolume(): number;
+    setVolume(volume: number): void;
+    stop(): void;
+    destroy(): void;
+    seek(time: number): void;
+    getCurrentTime(): number;
+    setCurrentTime(time: number): void;
+    update(): void;
+    updateForStreaming(): void;
+    nextFrame(): boolean;
+    updateForStaticFile(): void;
+}
+//# sourceMappingURL=player.d.ts.map
