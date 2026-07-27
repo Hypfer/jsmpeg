@@ -36,6 +36,8 @@ export class Player {
 	animationId: number | null = null;
 	startTime = 0;
 
+	private visibilityBound: () => void;
+
 	constructor(url: string, options: JSMpegOptions) {
 		this.options = options || {};
 
@@ -99,8 +101,9 @@ export class Player {
 
 		this.paused = true;
 		this.unpauseOnShow = false;
+		this.visibilityBound = () => this.showHide();
 		if (options.pauseWhenHidden !== false) {
-			document.addEventListener('visibilitychange', () => this.showHide());
+			document.addEventListener('visibilitychange', this.visibilityBound);
 		}
 
 		this.startLoading();
@@ -193,6 +196,7 @@ export class Player {
 
 	destroy(): void {
 		this.pause();
+		document.removeEventListener('visibilitychange', this.visibilityBound);
 		this.source.destroy?.();
 		this.video && this.video.destroy();
 		this.renderer && this.renderer.destroy();

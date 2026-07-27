@@ -831,6 +831,10 @@ export class MPEG1Video extends BaseDecoder implements VideoDecoder {
 			}
 
 			n += run;
+			// Cap at 64 (the max coefficients in a block) so tuning in mid-stream cannot kick this into an endless loop
+			if (n >= 64) {
+				break;
+			}
 			const dezigZagged = MPEG1Video.ZIG_ZAG[n];
 			n++;
 

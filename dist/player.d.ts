@@ -20,6 +20,7 @@ export declare class Player {
     isPlaying: boolean;
     animationId: number | null;
     startTime: number;
+    private visibilityBound;
     constructor(url: string, options: JSMpegOptions);
     get currentTime(): number;
     set currentTime(time: number);

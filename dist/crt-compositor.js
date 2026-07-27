@@ -148,6 +148,11 @@ export class CRTCompositor {
     }
     tick(now) {
         this.animationId = requestAnimationFrame(this.tickBound);
+        if (document.visibilityState !== 'visible') {
+            this.lastTickAt = now;
+            this.lastFrameAt = now;
+            return;
+        }
         const dt = Math.min((now - this.lastTickAt) / 1000, 0.1);
         this.lastTickAt = now;
         const sinceFrame = (now - this.lastFrameAt) / 1000;

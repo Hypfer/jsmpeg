@@ -78,8 +78,9 @@ export class Player {
         }
         this.paused = true;
         this.unpauseOnShow = false;
+        this.visibilityBound = () => this.showHide();
         if (options.pauseWhenHidden !== false) {
-            document.addEventListener('visibilitychange', () => this.showHide());
+            document.addEventListener('visibilitychange', this.visibilityBound);
         }
         this.startLoading();
     }
@@ -157,6 +158,7 @@ export class Player {
     destroy() {
         var _a, _b;
         this.pause();
+        document.removeEventListener('visibilitychange', this.visibilityBound);
         (_b = (_a = this.source).destroy) === null || _b === void 0 ? void 0 : _b.call(_a);
         this.video && this.video.destroy();
         this.renderer && this.renderer.destroy();
