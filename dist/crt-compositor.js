@@ -1,11 +1,12 @@
 import { Canvas2DRenderer } from './canvas2d-renderer.js';
 import { CRTCanvasBackend } from './crt-canvas-backend.js';
 import { CRTGLBackend } from './crt-gl-backend.js';
+import { LABEL_FONT_FAMILY, loadLabelFont } from './crt-label-font.js';
 import { WebGLRenderer } from './webgl-renderer.js';
 export function labelLayout(cfg, width, height) {
     const fontPx = Math.max(8, Math.round(height * cfg.labelScale));
     const margin = Math.round(fontPx * 0.7);
-    return { font: `bold ${fontPx}px 'Courier New', monospace`, x: width - margin, y: margin };
+    return { font: `bold ${fontPx}px '${LABEL_FONT_FAMILY}', monospace`, x: width - margin, y: margin };
 }
 function resolveCRTOptions(config) {
     var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k;
@@ -33,26 +34,20 @@ function smoothstep(a, b, x) {
 export class CRTCompositor {
     constructor(options, config) {
         this.enabled = true;
-        // Snow progress 0..1, eased both ways at the `ramp` rate (rises while frames
-        // are absent, falls as they resume). Displayed noise is a smoothstep of this.
         this.noiseP = 0;
         this.frameArrived = false;
         this.everConnected = false;
         this.standbyOn = false;
         this.saturatedSince = null;
         this.wasLive = false;
-        // Starts true so the first acquire also plays the tune-in: a cold start
-        // counts as coming from "no signal".
         this.sawStandby = true;
         this.channelStartAt = -1e12;
-        // Optional real connection state: tells a quiet-but-connected stall (stays on
-        // snow) from a genuine drop (cuts to the test card).
         this.streamStateWired = false;
         this.streamConnected = true;
-        // present-loop paint gate: skip redundant static repaints
         this.animationId = null;
         this.paintedOnce = false;
         this.prev = { noise: -1, standby: -1, black: -1, label: -1 };
+        this.destroyed = false;
         this.cfg = resolveCRTOptions(config);
         if (options.canvas) {
             this.canvas = options.canvas;
@@ -62,13 +57,10 @@ export class CRTCompositor {
             this.canvas = document.createElement('canvas');
             this.ownsCanvasElement = true;
         }
-        // Dimensions known in advance (options) win, else fall back to the canvas
-        // size. The MPEG1 sequence header reconciles later via resize().
         this.width = (options.videoWidth || this.canvas.width || 0) | 0;
         this.height = (options.videoHeight || this.canvas.height || 0) | 0;
         this.canvas.width = this.width;
         this.canvas.height = this.height;
-        // Offscreen surface for the base renderer.
         this.videoCanvas = document.createElement('canvas');
         this.videoCanvas.width = this.width;
         this.videoCanvas.height = this.height;
@@ -90,6 +82,13 @@ export class CRTCompositor {
         this.visibilityBound = () => this.onVisibility();
         document.addEventListener('visibilitychange', this.visibilityBound);
         this.animationId = requestAnimationFrame(this.tickBound);
+        loadLabelFont().then(() => {
+            if (this.destroyed) {
+                return;
+            }
+            this.backend.bakeLabel(this.cfg.label);
+            this.paintedOnce = false; // Redraw
+        }).catch(console.warn);
     }
     render(y, cb, cr, isClampedArray) {
         if (!this.enabled) {
@@ -119,6 +118,7 @@ export class CRTCompositor {
         this.paintedOnce = false;
     }
     destroy() {
+        this.destroyed = true;
         if (this.animationId !== null) {
             cancelAnimationFrame(this.animationId);
             this.animationId = null;
@@ -137,6 +137,7 @@ export class CRTCompositor {
     setLabel(text) {
         this.cfg.label = text;
         this.backend.bakeLabel(text);
+        this.paintedOnce = false;
     }
     onVisibility() {
         if (document.visibilityState === 'visible') {

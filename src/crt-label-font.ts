@@ -1,0 +1,31 @@
+// VCR OSD Mono by Riciery Leal
+
+const FAMILY = 'VCR OSD Mono';
+const WOFF2_B64 =
+	'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' ;
+
+let loading: Promise<void> | null = null;
+
+export const LABEL_FONT_FAMILY = FAMILY;
+
+export function loadLabelFont(): Promise<void> {
+	if (loading) {
+		return loading;
+	}
+	loading = new Promise<void>((resolve) => {
+		const url = `data:font/woff2;base64,${WOFF2_B64}`;
+		const style = document.createElement('style');
+		style.textContent = `@font-face{font-family:'${FAMILY}';src:url(${url}) format('woff2');font-display:block;}`;
+		document.head.appendChild(style);
+
+		const fonts = (document as Document & { fonts?: { load: (f: string) => Promise<unknown> } }).fonts;
+		if (!fonts || typeof fonts.load !== 'function') {
+			resolve();
+			return;
+		}
+		fonts
+			.load(`16px '${FAMILY}'`)
+			.then(() => resolve(), () => resolve());
+	});
+	return loading;
+}

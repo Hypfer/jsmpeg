@@ -15,10 +15,9 @@ const NOISE_FS = [
 	'uniform sampler2D uPrev;', // previous snow field
 	'uniform float uSeed;', // changes once per PRESENT (not per pixel)
 	'uniform float uBlend;', // fraction of previous frame retained (phosphor)
-	'uniform vec2  uRes;',
 	'float hash(vec2 p){ return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453123); }',
 	'void main(){',
-	'  vec2 px = vUv * uRes;',
+	'  vec2 px = vUv * vec2(640.0, 480.0);',
 	// Horizontal streak: coarse in x, fine in y — reads as TV snow, not dither.
 	'  float base = hash(vec2(floor(px.x / 2.0), floor(px.y)) + uSeed);',
 	'  float row  = hash(vec2(0.0, floor(px.y)) + uSeed * 1.7);', // whole-row flicker
@@ -43,7 +42,6 @@ const COMP_FS = [
 	'uniform float uBlack;', // 0/1 tune-in black screen
 	'uniform float uLabelAmt;', // 0/1 corner label opacity
 	'uniform float uScan;', // scanline strength
-	'uniform vec2  uRes;',
 	// EBU-style colour bars with a dark pedestal strip along the bottom.
 	'vec3 testCard(vec2 uv){',
 	'  float i = floor(uv.x * 7.0);',
@@ -60,14 +58,21 @@ const COMP_FS = [
 	'void main(){',
 	'  vec3 pic  = texture2D(uVideo, vUv).rgb;',
 	'  float sn  = texture2D(uSnow, vUv).r;',
-	'  vec3 withSnow = mix(pic, vec3(sn), uNoise);',
+
+	// Additive RF clipping that transitions to pure replacing snow as signal is lost
+	'  vec3 noisyPic = clamp(pic + (vec3(sn) - 0.5) * (uNoise * 2.0), 0.0, 1.0);',
+	'  vec3 withSnow = mix(noisyPic, vec3(sn), uNoise);',
+
 	// Hard-cut to the colour-bar test card as the no-signal screen.
 	'  vec3 col = mix(withSnow, testCard(vUv), uStandby);',
-	// Subtle CRT scanlines over the picture.
-	'  float line = 1.0 - uScan * (0.5 + 0.5 * sin(vUv.y * uRes.y * 3.14159));',
+
+	// Subtle CRT scanlines over the picture (Fixed 480 scanlines, avoids Moiré scaling bugs)
+	'  float line = 1.0 - uScan * (0.5 + 0.5 * sin(vUv.y * 480.0 * 3.14159));',
 	'  col *= line;',
+
 	// Tune-in black screen (briefly, while the set locks onto the channel).
 	'  col = mix(col, vec3(0.0), uBlack);',
+
 	// Green corner channel label on top (like a channel-switch OSD).
 	'  vec4 lb = texture2D(uLabel, vUv);',
 	'  col = mix(col, lb.rgb, lb.a * uLabelAmt);',
@@ -147,7 +152,8 @@ export class CRTGLBackend implements CRTBackend {
 
 		this.noiseProg = this.program(VS, NOISE_FS);
 		this.compProg = this.program(VS, COMP_FS);
-		this.noiseLoc = this.locations(this.noiseProg, ['uPrev', 'uSeed', 'uBlend', 'uRes']);
+		// Removed uRes from locations since it's hardcoded in the shader now
+		this.noiseLoc = this.locations(this.noiseProg, ['uPrev', 'uSeed', 'uBlend']);
 		this.compLoc = this.locations(this.compProg, [
 			'uVideo',
 			'uSnow',
@@ -157,7 +163,6 @@ export class CRTGLBackend implements CRTBackend {
 			'uBlack',
 			'uLabelAmt',
 			'uScan',
-			'uRes',
 		]);
 
 		this.videoTex = this.makeTex(this.width, this.height);
@@ -298,9 +303,9 @@ export class CRTGLBackend implements CRTBackend {
 		gl.activeTexture(gl.TEXTURE0);
 		gl.bindTexture(gl.TEXTURE_2D, this.snowA.tex);
 		gl.uniform1i(this.noiseLoc.uPrev, 0);
+		// Linear increment creates the sweeping/crawling RF interference pattern
 		gl.uniform1f(this.noiseLoc.uSeed, (this.seed % 997) * 1.37);
 		gl.uniform1f(this.noiseLoc.uBlend, this.cfg.phosphorBlend);
-		gl.uniform2f(this.noiseLoc.uRes, w, h);
 		gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
 		const tmp = this.snowA;
 		this.snowA = this.snowB;
@@ -325,7 +330,6 @@ export class CRTGLBackend implements CRTBackend {
 		gl.uniform1f(this.compLoc.uBlack, l.black);
 		gl.uniform1f(this.compLoc.uLabelAmt, l.label);
 		gl.uniform1f(this.compLoc.uScan, this.cfg.scanlines);
-		gl.uniform2f(this.compLoc.uRes, w, h);
 		gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
 	}
 

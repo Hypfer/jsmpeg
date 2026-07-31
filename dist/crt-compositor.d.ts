@@ -81,6 +81,7 @@ export declare class CRTCompositor implements Renderer, StreamStateSink {
     private prev;
     private tickBound;
     private visibilityBound;
+    private destroyed;
     constructor(options: JSMpegOptions, config?: CRTOptions);
     render(y: PlaneData, cb: PlaneData, cr: PlaneData, isClampedArray?: boolean): void;
     renderProgress(_progress: number): void;

@@ -1,6 +1,7 @@
 import { Canvas2DRenderer } from './canvas2d-renderer.js';
 import { CRTCanvasBackend } from './crt-canvas-backend.js';
 import { CRTGLBackend } from './crt-gl-backend.js';
+import { LABEL_FONT_FAMILY, loadLabelFont } from './crt-label-font.js';
 import { WebGLRenderer } from './webgl-renderer.js';
 import type { JSMpegOptions, PlaneData, Renderer, StreamState, StreamStateSink } from './types.js';
 
@@ -51,7 +52,7 @@ export function labelLayout(
 ): { font: string; x: number; y: number } {
 	const fontPx = Math.max(8, Math.round(height * cfg.labelScale));
 	const margin = Math.round(fontPx * 0.7);
-	return { font: `bold ${fontPx}px 'Courier New', monospace`, x: width - margin, y: margin };
+	return { font: `bold ${fontPx}px '${LABEL_FONT_FAMILY}', monospace`, x: width - margin, y: margin };
 }
 
 export interface CRTLevels {
@@ -99,42 +100,35 @@ export class CRTCompositor implements Renderer, StreamStateSink {
 	readonly canvas: HTMLCanvasElement;
 	private ownsCanvasElement: boolean;
 
-	private base: Renderer; // draws decoded frames to videoCanvas
-	private videoCanvas: HTMLCanvasElement; // offscreen; base renderer's surface
+	private base: Renderer;
+	private videoCanvas: HTMLCanvasElement;
 	private backend: CRTBackend;
 
 	private cfg: ResolvedCRTOptions;
 	private width: number;
 	private height: number;
 
-	// state machine
 	private lastFrameAt: number;
 	private lastTickAt: number;
-	// Snow progress 0..1, eased both ways at the `ramp` rate (rises while frames
-	// are absent, falls as they resume). Displayed noise is a smoothstep of this.
 	private noiseP = 0;
 	private frameArrived = false;
 	private everConnected = false;
 	private standbyOn = false;
 	private saturatedSince: number | null = null;
 	private wasLive = false;
-	// Starts true so the first acquire also plays the tune-in: a cold start
-	// counts as coming from "no signal".
 	private sawStandby = true;
 	private channelStartAt = -1e12;
 
-	// Optional real connection state: tells a quiet-but-connected stall (stays on
-	// snow) from a genuine drop (cuts to the test card).
 	private streamStateWired = false;
 	private streamConnected = true;
 
-	// present-loop paint gate: skip redundant static repaints
 	private animationId: number | null = null;
 	private paintedOnce = false;
 	private prev: CRTLevels = { noise: -1, standby: -1, black: -1, label: -1 };
 
 	private tickBound: (now: number) => void;
 	private visibilityBound: () => void;
+	private destroyed = false;
 
 	constructor(options: JSMpegOptions, config?: CRTOptions) {
 		this.cfg = resolveCRTOptions(config);
@@ -147,14 +141,11 @@ export class CRTCompositor implements Renderer, StreamStateSink {
 			this.ownsCanvasElement = true;
 		}
 
-		// Dimensions known in advance (options) win, else fall back to the canvas
-		// size. The MPEG1 sequence header reconciles later via resize().
 		this.width = (options.videoWidth || this.canvas.width || 0) | 0;
 		this.height = (options.videoHeight || this.canvas.height || 0) | 0;
 		this.canvas.width = this.width;
 		this.canvas.height = this.height;
 
-		// Offscreen surface for the base renderer.
 		this.videoCanvas = document.createElement('canvas');
 		this.videoCanvas.width = this.width;
 		this.videoCanvas.height = this.height;
@@ -182,6 +173,15 @@ export class CRTCompositor implements Renderer, StreamStateSink {
 		document.addEventListener('visibilitychange', this.visibilityBound);
 
 		this.animationId = requestAnimationFrame(this.tickBound);
+
+		loadLabelFont().then(() => {
+			if (this.destroyed) {
+				return;
+			}
+			
+			this.backend.bakeLabel(this.cfg.label);
+			this.paintedOnce = false; // Redraw
+		}).catch(console.warn);
 	}
 
 	render(y: PlaneData, cb: PlaneData, cr: PlaneData, isClampedArray?: boolean): void {
@@ -216,6 +216,8 @@ export class CRTCompositor implements Renderer, StreamStateSink {
 	}
 
 	destroy(): void {
+		this.destroyed = true;
+
 		if (this.animationId !== null) {
 			cancelAnimationFrame(this.animationId);
 			this.animationId = null;
@@ -236,6 +238,8 @@ export class CRTCompositor implements Renderer, StreamStateSink {
 	setLabel(text: string): void {
 		this.cfg.label = text;
 		this.backend.bakeLabel(text);
+
+		this.paintedOnce = false;
 	}
 
 	private onVisibility(): void {
