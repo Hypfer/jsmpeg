@@ -42,7 +42,8 @@ export class TSDemuxer {
         else {
             this.bits = new BitBuffer(buffer);
         }
-        while (this.bits.has(188 << 3) && this.parsePacket()) { }
+        while (this.bits.has(188 << 3) && this.parsePacket()) {
+        }
         const leftoverCount = this.bits.byteLength - (this.bits.index >> 3);
         this.leftoverBytes =
             leftoverCount > 0 ? this.bits.bytes.subarray(this.bits.index >> 3) : null;

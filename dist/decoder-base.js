@@ -14,7 +14,8 @@ export class BaseDecoder {
     get currentTime() {
         return this.getCurrentTime();
     }
-    destroy() { }
+    destroy() {
+    }
     connect(destination) {
         this.destination = destination;
     }

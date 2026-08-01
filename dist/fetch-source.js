@@ -111,7 +111,8 @@ export class FetchSource {
         this.clearStallTimer();
         this.shouldAttemptReconnect = false;
         // Cancel the read loop and abort the in-flight request.
-        (_a = this.reader) === null || _a === void 0 ? void 0 : _a.cancel().catch(() => { });
+        (_a = this.reader) === null || _a === void 0 ? void 0 : _a.cancel().catch(() => {
+        });
         this.reader = null;
         (_b = this.abortController) === null || _b === void 0 ? void 0 : _b.abort();
         this.setState('closed');
